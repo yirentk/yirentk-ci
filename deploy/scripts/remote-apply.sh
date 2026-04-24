@@ -11,7 +11,7 @@ release_dir="$1"
 namespace="$2"
 host_port="$3"
 
-sudo ctr -n k8s.io images import "${release_dir}/yirentk-image.tar"
+sudo k3s ctr images import "${release_dir}/yirentk-image.tar"
 
 kubectl apply -f "${release_dir}/namespace.yaml"
 

@@ -190,6 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error \
+            --max-time 10 \
             "http://${{ vars.YIRENTK_SERVER_HOST }}:${{ vars.YIRENTK_HOST_PORT }}/api/healthz"
 
       - name: Summarize deployment
