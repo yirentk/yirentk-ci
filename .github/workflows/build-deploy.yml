@@ -1,0 +1,207 @@
+name: Build And Deploy Yirentk
+
+on:
+  repository_dispatch:
+    types:
+      - deploy-from-private
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: Source repository to build
+        default: yirentk/yirentk
+        required: true
+        type: string
+      source_ref:
+        description: Git ref to build when source_sha is omitted
+        default: refs/heads/main
+        required: true
+        type: string
+      source_sha:
+        description: Exact commit SHA to build
+        default: ""
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yirentk-build-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      RELEASE_ROOT: release/bundle
+      REMOTE_BASE_DIR: /tmp/yirentk-ci
+      K8S_NAMESPACE: yirentk
+
+    steps:
+      - name: Resolve source payload
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "repository_dispatch" ]; then
+            source_repo='${{ github.event.client_payload.source_repo }}'
+            source_ref='${{ github.event.client_payload.source_ref }}'
+            source_sha='${{ github.event.client_payload.source_sha }}'
+          else
+            source_repo='${{ inputs.source_repo }}'
+            source_ref='${{ inputs.source_ref }}'
+            source_sha='${{ inputs.source_sha }}'
+          fi
+
+          if [ -z "${source_repo}" ]; then
+            echo "source_repo is required" >&2
+            exit 1
+          fi
+
+          checkout_ref="${source_sha:-$source_ref}"
+          if [ -z "${checkout_ref}" ]; then
+            echo "either source_sha or source_ref is required" >&2
+            exit 1
+          fi
+
+          echo "source_repo=${source_repo}" >> "${GITHUB_OUTPUT}"
+          echo "source_ref=${source_ref}" >> "${GITHUB_OUTPUT}"
+          echo "source_sha=${source_sha}" >> "${GITHUB_OUTPUT}"
+          echo "checkout_ref=${checkout_ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout CI repository
+        uses: actions/checkout@v4
+
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.resolve.outputs.source_repo }}
+          ref: ${{ steps.resolve.outputs.checkout_ref }}
+          token: ${{ secrets.YIRENTK_SOURCE_REPO_TOKEN }}
+          path: source
+          fetch-depth: 1
+
+      - name: Capture source revision
+        id: revision
+        run: |
+          set -euo pipefail
+          actual_sha=$(git -C source rev-parse HEAD)
+          short_sha=$(git -C source rev-parse --short=12 HEAD)
+          image_ref="docker.io/library/yirentk:${actual_sha}"
+          remote_dir="${REMOTE_BASE_DIR}/${actual_sha}"
+
+          echo "actual_sha=${actual_sha}" >> "${GITHUB_OUTPUT}"
+          echo "short_sha=${short_sha}" >> "${GITHUB_OUTPUT}"
+          echo "image_ref=${image_ref}" >> "${GITHUB_OUTPUT}"
+          echo "remote_dir=${remote_dir}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: source/go.mod
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: source/web/package-lock.json
+
+      - name: Run source test suite
+        working-directory: source
+        run: make test
+
+      - name: Build image archive
+        run: |
+          set -euo pipefail
+          mkdir -p "${RELEASE_ROOT}"
+
+          docker build \
+            --tag "${{ steps.revision.outputs.image_ref }}" \
+            source
+
+          docker save \
+            --output "${RELEASE_ROOT}/yirentk-image.tar" \
+            "${{ steps.revision.outputs.image_ref }}"
+
+      - name: Render deployment bundle
+        env:
+          IMAGE_REF: ${{ steps.revision.outputs.image_ref }}
+          SERVER_HOST: ${{ vars.YIRENTK_SERVER_HOST }}
+          HOST_PORT: ${{ vars.YIRENTK_HOST_PORT }}
+          AUTH_SECRET: ${{ secrets.YIRENTK_AUTH_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SERVER_HOST:-}" ] || [ -z "${HOST_PORT:-}" ] || [ -z "${AUTH_SECRET:-}" ]; then
+            echo "missing YIRENTK_SERVER_HOST, YIRENTK_HOST_PORT, or YIRENTK_AUTH_SECRET" >&2
+            exit 1
+          fi
+
+          ./deploy/scripts/render-bundle.sh \
+            "${RELEASE_ROOT}" \
+            "${IMAGE_REF}" \
+            "${SERVER_HOST}" \
+            "${HOST_PORT}" \
+            "${AUTH_SECRET}"
+
+      - name: Install SSH key
+        env:
+          DEPLOY_KEY: ${{ secrets.YIRENTK_DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DEPLOY_KEY:-}" ]; then
+            echo "missing YIRENTK_DEPLOY_SSH_KEY secret" >&2
+            exit 1
+          fi
+
+          mkdir -p "${HOME}/.ssh"
+          chmod 700 "${HOME}/.ssh"
+          printf '%s\n' "${DEPLOY_KEY}" > "${HOME}/.ssh/id_rsa"
+          chmod 600 "${HOME}/.ssh/id_rsa"
+          ssh-keyscan -H "${{ vars.YIRENTK_SERVER_HOST }}" >> "${HOME}/.ssh/known_hosts"
+
+      - name: Upload deployment bundle
+        run: |
+          set -euo pipefail
+          ssh "${{ vars.YIRENTK_SERVER_USER }}@${{ vars.YIRENTK_SERVER_HOST }}" \
+            "mkdir -p '${{ steps.revision.outputs.remote_dir }}'"
+
+          scp "${RELEASE_ROOT}/yirentk-image.tar" \
+              "${RELEASE_ROOT}/config.toml" \
+              "${RELEASE_ROOT}/deployment.yaml" \
+              "${RELEASE_ROOT}/namespace.yaml" \
+              "${RELEASE_ROOT}/pvc.yaml" \
+              "${RELEASE_ROOT}/service.yaml" \
+              "${RELEASE_ROOT}/remote-apply.sh" \
+              "${{ vars.YIRENTK_SERVER_USER }}@${{ vars.YIRENTK_SERVER_HOST }}:${{ steps.revision.outputs.remote_dir }}/"
+
+      - name: Apply deployment on server
+        run: |
+          set -euo pipefail
+          ssh "${{ vars.YIRENTK_SERVER_USER }}@${{ vars.YIRENTK_SERVER_HOST }}" \
+            "bash '${{ steps.revision.outputs.remote_dir }}/remote-apply.sh' '${{ steps.revision.outputs.remote_dir }}' '${K8S_NAMESPACE}' '${{ vars.YIRENTK_HOST_PORT }}'"
+
+      - name: Check external health endpoint
+        id: external_health
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            "http://${{ vars.YIRENTK_SERVER_HOST }}:${{ vars.YIRENTK_HOST_PORT }}/api/healthz"
+
+      - name: Summarize deployment
+        run: |
+          cat <<EOF >> "${GITHUB_STEP_SUMMARY}"
+          ## Deployment Complete
+
+          - Source repo: `${{ steps.resolve.outputs.source_repo }}`
+          - Source ref: `${{ steps.resolve.outputs.source_ref }}`
+          - Source sha: `${{ steps.revision.outputs.actual_sha }}`
+          - Image: `${{ steps.revision.outputs.image_ref }}`
+          - Namespace: `${K8S_NAMESPACE}`
+          - URL: `http://${{ vars.YIRENTK_SERVER_HOST }}:${{ vars.YIRENTK_HOST_PORT }}/`
+          - External health: `${{ steps.external_health.outcome }}`
+          EOF

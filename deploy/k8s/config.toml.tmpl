@@ -1,0 +1,29 @@
+[api]
+addr = ":8080"
+data_dir = "/app/data"
+static_dir = "/app/web/dist"
+allowed_origin = "http://__SERVER_HOST__:__HOST_PORT__"
+
+[auth]
+issuer = "yirentk"
+secret = "__AUTH_SECRET__"
+access_token_ttl = "15m"
+refresh_token_ttl = "168h"
+refresh_cookie_name = "yirentk_refresh"
+
+[knowledge]
+output_dir = "/app/output"
+reindex_mode = "incremental"
+max_chunk_chars = 520
+lexical_top_k = 20
+vector_top_k = 20
+retrieval_top_k = 8
+auto_rebuild = true
+
+[model]
+provider = "local"
+chat_model = "gpt-4.1-mini"
+embedding_model = "text-embedding-3-small"
+vector_dimensions = 128
+max_context_chunks = 6
+grounding_threshold = 0.015
