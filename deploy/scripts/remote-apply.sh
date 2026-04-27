@@ -24,6 +24,7 @@ kubectl apply -f "${release_dir}/pvc.yaml"
 kubectl apply -f "${release_dir}/service.yaml"
 kubectl apply -f "${release_dir}/deployment.yaml"
 
+kubectl -n "${namespace}" rollout restart deploy/yirentk
 kubectl -n "${namespace}" rollout status deploy/yirentk --timeout=240s
 kubectl -n "${namespace}" get pvc,pod,svc,deploy
 
