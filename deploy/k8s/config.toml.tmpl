@@ -4,12 +4,20 @@ data_dir = "/app/data"
 static_dir = "/app/web/dist"
 allowed_origin = "http://__SERVER_HOST__:__HOST_PORT__"
 
+[database]
+driver = "postgres"
+dsn = "__DATABASE_DSN__"
+max_open_conns = 20
+max_idle_conns = 10
+conn_max_lifetime = "30m"
+conn_max_idle_time = "5m"
+
 [auth]
 issuer = "yirentk"
 secret = "__AUTH_SECRET__"
 access_token_ttl = "15m"
 refresh_token_ttl = "168h"
-refresh_cookie_name = "yirentk_refresh"
+refresh_cookie_name = "yirentk_session"
 
 [knowledge]
 output_dir = "/app/output"
@@ -21,7 +29,9 @@ retrieval_top_k = 8
 auto_rebuild = true
 
 [model]
-provider = "local"
+provider = "openai-compatible"
+base_url = "__MODEL_BASE_URL__"
+api_key = "__MODEL_API_KEY__"
 chat_model = "gpt-4.1-mini"
 embedding_model = "text-embedding-3-small"
 vector_dimensions = 128

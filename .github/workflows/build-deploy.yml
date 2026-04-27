@@ -131,11 +131,14 @@ jobs:
           SERVER_HOST: ${{ vars.YIRENTK_SERVER_HOST }}
           HOST_PORT: ${{ vars.YIRENTK_HOST_PORT }}
           AUTH_SECRET: ${{ secrets.YIRENTK_AUTH_SECRET }}
+          DATABASE_DSN: ${{ secrets.YIRENTK_DATABASE_DSN }}
+          MODEL_BASE_URL: ${{ vars.YIRENTK_MODEL_BASE_URL }}
+          MODEL_API_KEY: ${{ secrets.YIRENTK_MODEL_API_KEY }}
         run: |
           set -euo pipefail
 
-          if [ -z "${SERVER_HOST:-}" ] || [ -z "${HOST_PORT:-}" ] || [ -z "${AUTH_SECRET:-}" ]; then
-            echo "missing YIRENTK_SERVER_HOST, YIRENTK_HOST_PORT, or YIRENTK_AUTH_SECRET" >&2
+          if [ -z "${SERVER_HOST:-}" ] || [ -z "${HOST_PORT:-}" ] || [ -z "${AUTH_SECRET:-}" ] || [ -z "${DATABASE_DSN:-}" ] || [ -z "${MODEL_BASE_URL:-}" ] || [ -z "${MODEL_API_KEY:-}" ]; then
+            echo "missing YIRENTK_SERVER_HOST, YIRENTK_HOST_PORT, YIRENTK_AUTH_SECRET, YIRENTK_DATABASE_DSN, YIRENTK_MODEL_BASE_URL, or YIRENTK_MODEL_API_KEY" >&2
             exit 1
           fi
 
@@ -144,7 +147,10 @@ jobs:
             "${IMAGE_REF}" \
             "${SERVER_HOST}" \
             "${HOST_PORT}" \
-            "${AUTH_SECRET}"
+            "${AUTH_SECRET}" \
+            "${DATABASE_DSN}" \
+            "${MODEL_BASE_URL}" \
+            "${MODEL_API_KEY}"
 
       - name: Install SSH key
         env:

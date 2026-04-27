@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 5 ]; then
-  echo "usage: $0 <release_dir> <image_ref> <server_host> <host_port> <auth_secret>" >&2
+if [ "$#" -ne 8 ]; then
+  echo "usage: $0 <release_dir> <image_ref> <server_host> <host_port> <auth_secret> <database_dsn> <model_base_url> <model_api_key>" >&2
   exit 1
 fi
 
@@ -12,6 +12,9 @@ image_ref="$2"
 server_host="$3"
 host_port="$4"
 auth_secret="$5"
+database_dsn="$6"
+model_base_url="$7"
+model_api_key="$8"
 
 template_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/k8s"
 
@@ -32,4 +35,7 @@ sed \
   -e "s|__SERVER_HOST__|${server_host}|g" \
   -e "s|__HOST_PORT__|${host_port}|g" \
   -e "s|__AUTH_SECRET__|${auth_secret}|g" \
+  -e "s|__DATABASE_DSN__|${database_dsn}|g" \
+  -e "s|__MODEL_BASE_URL__|${model_base_url}|g" \
+  -e "s|__MODEL_API_KEY__|${model_api_key}|g" \
   "${template_root}/config.toml.tmpl" > "${release_dir}/config.toml"
