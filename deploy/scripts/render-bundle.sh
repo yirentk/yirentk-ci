@@ -16,6 +16,23 @@ database_dsn="$6"
 model_base_url="$7"
 model_api_key="$8"
 
+reject_placeholder_secret() {
+  local name="$1"
+  local value="$2"
+  local normalized
+  normalized="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+
+  case "$normalized" in
+    *placeholder*|*replace-with*|*your-api-key*)
+      echo "${name} is still a placeholder; configure the real GitHub secret before deploying" >&2
+      exit 1
+      ;;
+  esac
+}
+
+reject_placeholder_secret "AUTH_SECRET" "${auth_secret}"
+reject_placeholder_secret "MODEL_API_KEY" "${model_api_key}"
+
 template_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/k8s"
 
 mkdir -p "${release_dir}"
